@@ -567,7 +567,22 @@ Do not write code, write markdown specification only. Be extremely verbose to re
     if (!specContent) {
       // Rich templates based on workflows
       if (workflow === "PROJECT_CODING") {
-        specContent = `# Sprint Contract: SQLite Account Balance Lookup Engine
+        if (reqText.toLowerCase().includes("diary")) {
+          specContent = `# Sprint Contract: Simple Diary Application
+## 1. Target Objective
+Build a robust simple diary application in Python that saves, lists, and manages user diary entries.
+
+## 2. Technical Constraint Checklist
+- **Storage Engine**: Local file-based storage (e.g. \`diary.json\`)
+- **Format**: Entries must have a robust ISO timestamp and content text.
+- **Vague Section (TBD)**: The directory or structure will be configured dynamically on execution.
+- **Output Standard**: Readable CLI printed interface.
+
+## 3. Pre-Coding Test Suite Schema
+- Test file initialization and error resilience when missing.
+`;
+        } else {
+          specContent = `# Sprint Contract: SQLite Account Balance Lookup Engine
 ## 1. Target Objective
 Build a robust SQLite database lookup engine that queries balances for customer code \`usr-9901\` and reports findings in standard markdown table layout.
 
@@ -581,6 +596,7 @@ Build a robust SQLite database lookup engine that queries balances for customer 
 - Test SQLite file existence before establishing connection.
 - Test query resolution returns correct balance values.
 `;
+        }
       } else if (workflow === "MD_KNOWLEDGE") {
         specContent = `# Sprint Contract: Multi-Agent Architecture Documentation
 ## 1. Target Objective
@@ -643,9 +659,15 @@ Create structured XML/Markdown presentation blueprint outlining slide layouts an
     // Update spec with refined content
     let refinedSpec = specContent;
     if (workflow === "PROJECT_CODING") {
-      refinedSpec = refinedSpec
-        .replace("TBD: We will adjust connection parameters later on the fly or hardcode credentials.", "")
-        .concat(`\n## 4. Hardened Connection Specification\n- Hard-coded sandbox path: \`./balance.db\`\n- Connection pool size: 1 (Rigid Single-Threaded Access)\n- Strict input validation regex: \`^[a-zA-Z0-9-]{3,12}$\``);
+      if (reqText.toLowerCase().includes("diary")) {
+        refinedSpec = refinedSpec
+          .replace("TBD: The directory or structure will be configured dynamically on execution.", "")
+          .concat(`\n## 4. Hardened Storage Specification\n- Hard-coded sandbox path: \`./diary.json\`\n- Timezone: UTC\n- Safe handling of corrupted files.`);
+      } else {
+        refinedSpec = refinedSpec
+          .replace("TBD: We will adjust connection parameters later on the fly or hardcode credentials.", "")
+          .concat(`\n## 4. Hardened Connection Specification\n- Hard-coded sandbox path: \`./balance.db\`\n- Connection pool size: 1 (Rigid Single-Threaded Access)\n- Strict input validation regex: \`^[a-zA-Z0-9-]{3,12}$\``);
+      }
     } else if (workflow === "MD_KNOWLEDGE") {
       refinedSpec = refinedSpec
         .replace("TBD: We will research other European legal compliance acts and insert them randomly.", "")
@@ -697,7 +719,12 @@ Create structured XML/Markdown presentation blueprint outlining slide layouts an
     let targetFileContent = "";
 
     if (workflow === "PROJECT_CODING") {
-      targetFileName = "balance_query.py";
+      if (reqText.toLowerCase().includes("diary")) {
+        targetFileName = "diary.py";
+      } else {
+        targetFileName = "balance_query.py";
+      }
+
       if (aiClient) {
         try {
           let modelName = "gemini-3.5-flash";
@@ -711,7 +738,22 @@ Create structured XML/Markdown presentation blueprint outlining slide layouts an
             executorTemp = conf.agents.executor.temperature !== undefined ? conf.agents.executor.temperature : executorTemp;
           }
 
-          const executorPrompt = `${executorInstruction}\n\nWrite complete, functional python code based on this specification: \n${refinedSpec}\nYour output should contain ONLY the code blocks, fully comments, proper error handling and SQLite query for usr-9901. Do not use truncated code.`;
+          // Let's dynamically ask Gemini for targetFileName as well if we have real client!
+          try {
+            const fnResponse = await aiClient.models.generateContent({
+              model: modelName,
+              contents: `Identify the single most appropriate filename for the python deliverable of this specification: \n${refinedSpec}\nReturn ONLY the filename itself (e.g. 'diary.py' or 'balance_query.py'), with NO markdown, NO formatting, and NO extra words.`,
+              config: { temperature: 0.1 }
+            });
+            const parsedFn = fnResponse.text?.trim();
+            if (parsedFn && parsedFn.endsWith(".py") && !parsedFn.includes(" ") && parsedFn.length < 50) {
+              targetFileName = parsedFn;
+            }
+          } catch (err) {
+            console.error("Failed to dynamically fetch filename from API, using default.");
+          }
+
+          const executorPrompt = `${executorInstruction}\n\nWrite complete, functional python code based on this specification: \n${refinedSpec}\nYour output should contain ONLY the code blocks, fully comments, proper error handling and target logic. Do not use truncated code.`;
           const execRes = await aiClient.models.generateContent({
             model: modelName,
             contents: executorPrompt,
@@ -726,7 +768,55 @@ Create structured XML/Markdown presentation blueprint outlining slide layouts an
       }
 
       if (!targetFileContent) {
-        targetFileContent = `import sqlite3
+        if (targetFileName === "diary.py" || reqText.toLowerCase().includes("diary")) {
+          targetFileName = "diary.py";
+          targetFileContent = `import os
+import json
+from datetime import datetime
+
+class SimpleDiary:
+    def __init__(self, filename="diary.json"):
+        self.filename = filename
+        self.entries = []
+        self.load_entries()
+
+    def load_entries(self):
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, 'r', encoding='utf-8') as f:
+                    self.entries = json.load(f)
+            except Exception:
+                self.entries = []
+
+    def save_entries(self):
+        with open(self.filename, 'w', encoding='utf-8') as f:
+            json.dump(self.entries, f, ensure_ascii=False, indent=4)
+
+    def add_entry(self, content):
+        entry = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "content": content
+        }
+        self.entries.append(entry)
+        self.save_entries()
+        print("✓ 일기가 성공적으로 저장되었습니다!")
+
+    def list_entries(self):
+        if not self.entries:
+            print("작성된 일기가 없습니다.")
+            return
+        print("\\n=== 일기 목록 ===")
+        for idx, entry in enumerate(self.entries, 1):
+            print(f"[{idx}] {entry['timestamp']}\\n{entry['content']}\\n{'-'*20}")
+
+if __name__ == "__main__":
+    diary = SimpleDiary()
+    diary.add_entry("오늘 OpenCode Harness를 활용하여 일기장 애플리케이션을 구현했다. 정말 신기하고 재미있었다!")
+    diary.list_entries()
+`;
+        } else {
+          targetFileName = "balance_query.py";
+          targetFileContent = `import sqlite3
 import re
 
 def query_user_balance(user_id: str):
@@ -759,6 +849,7 @@ if __name__ == "__main__":
     balance = query_user_balance("usr-9901")
     print(f"Customer balance for usr-9901: \${balance:,.2f}")
 `;
+        }
       }
     } else if (workflow === "MD_KNOWLEDGE") {
       targetFileName = "architecture.md";
@@ -832,41 +923,153 @@ By utilizing standard OS directory structures, we avoid heavy abstract libraries
     // Let's simulate a FAIL / self-healing scenario on the first run for Project Coding!
     // This perfectly demonstrates "정반합 (Thesis-Antithesis-Synthesis)" feedback of the guide!
     if (workflow === "PROJECT_CODING" && activeSimState.iteration === 1) {
-      activeSimState.thoughtChain.push("[Critic Agent] <thought>Analyzing balance_query.py. The SQLite connector does not handle exception state if sqlite3 db gets locked. Also, the user requirement specifies 'reporting findings in standard markdown table layout', but balance_query.py simply prints a raw string! This violates the target spec constraint 100% completion rule.</thought>");
-      activeSimState.thoughtChain.push("[Critic Agent] CRITIC AUDIT FAILED! Missing markdown table reports and db lock safety. Marking FAIL and reverting state back to [tasks/].");
-      
-      // Inject adversarial feedback into tasks/spec.md and revert files
-      const feedbackSpec = refinedSpec + `\n\n## Adversarial Critic Feedback (FAIL - Rev 1)\n- **Reason**: Generated code prints raw terminal string instead of the requested 'standard markdown table layout'.\n- **Fix**: Code must format the output value inside a neat markdown table format:\n| Customer ID | Balance |\n|---|---|\n| usr-9901 | $X.XX |\nAnd implement SQLite connector exceptions safety.`;
-      
-      fs.writeFileSync(path.join(SIM_DIR, "tasks", "spec.md"), feedbackSpec);
-      
-      // Delete from review
-      if (fs.existsSync(reviewPath)) fs.unlinkSync(reviewPath);
-      if (fs.existsSync(path.join(SIM_DIR, "review", "spec.md"))) fs.unlinkSync(path.join(SIM_DIR, "review", "spec.md"));
+      if (targetFileName === "diary.py" || reqText.toLowerCase().includes("diary")) {
+        activeSimState.thoughtChain.push("[Critic Agent] <thought>Analyzing diary.py. The SimpleDiary class saves logs correctly, but it lacks an interactive CLI shell for adding/listing entries via the terminal! This violates the robust client usability requirements.</thought>");
+        activeSimState.thoughtChain.push("[Critic Agent] CRITIC AUDIT FAILED! Missing an interactive CLI interface. Marking FAIL and reverting state back to [tasks/].");
+        
+        const feedbackSpec = refinedSpec + `\n\n## Adversarial Critic Feedback (FAIL - Rev 1)\n- **Reason**: Generated code executes once programmatically but does not provide an interactive terminal shell interface.\n- **Fix**: Code must offer an interactive choice loop (e.g., [1] Add Entry, [2] View Entries, [3] Exit) so users can actively use the diary via CLI.`;
+        
+        fs.writeFileSync(path.join(SIM_DIR, "tasks", "spec.md"), feedbackSpec);
+        
+        if (fs.existsSync(reviewPath)) fs.unlinkSync(reviewPath);
+        if (fs.existsSync(path.join(SIM_DIR, "review", "spec.md"))) fs.unlinkSync(path.join(SIM_DIR, "review", "spec.md"));
 
-      activeSimState.iteration = 2;
-      activeSimState.metrics.planAdherence = 0.5;
-      activeSimState.metrics.argumentCorrectness = 0.6;
-      activeSimState.metrics.reasoningCoherence = 0.7;
+        activeSimState.iteration = 2;
+        activeSimState.metrics.planAdherence = 0.5;
+        activeSimState.metrics.argumentCorrectness = 0.6;
+        activeSimState.metrics.reasoningCoherence = 0.7;
 
-      addAuditLog(
-        "Critic",
-        "AUDIT_FAIL",
-        `Adversarial audit failed. Target file balance_query.py missed markdown table format requirements. Forcing Reversion.`,
-        "balance_query.py",
-        { from: "review", to: "tasks" },
-        "California AI Transparency Act Section 3 (System traceability & verification)"
-      );
+        addAuditLog(
+          "Critic",
+          "AUDIT_FAIL",
+          `Adversarial audit failed. Target file diary.py missed interactive CLI interface. Forcing Reversion.`,
+          "diary.py",
+          { from: "review", to: "tasks" },
+          "California AI Transparency Act Section 3 (System traceability & verification)"
+        );
 
-      await delay(2500);
+        await delay(2500);
 
-      // Re-trigger Executor with Self-Healing feedback
-      activeSimState.currentStep = "EXECUTOR_STAGE_HEALING";
-      activeSimState.activeAgent = "EXECUTOR";
-      activeSimState.thoughtChain.push("[Executor Agent] Received Critic feedback. Initiating self-healing protocol... Modifying balance_query.py to write markdown table reports...");
-      await delay(2500);
+        // Re-trigger Executor with Self-Healing feedback
+        activeSimState.currentStep = "EXECUTOR_STAGE_HEALING";
+        activeSimState.activeAgent = "EXECUTOR";
+        activeSimState.thoughtChain.push("[Executor Agent] Received Critic feedback. Initiating self-healing protocol... Modifying diary.py to implement interactive CLI menu...");
+        await delay(2500);
 
-      const healedCode = `import sqlite3
+        const healedCode = `import os
+import json
+from datetime import datetime
+
+class SimpleDiary:
+    def __init__(self, filename="diary.json"):
+        self.filename = filename
+        self.entries = []
+        self.load_entries()
+
+    def load_entries(self):
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, 'r', encoding='utf-8') as f:
+                    self.entries = json.load(f)
+            except Exception:
+                self.entries = []
+
+    def save_entries(self):
+        with open(self.filename, 'w', encoding='utf-8') as f:
+            json.dump(self.entries, f, ensure_ascii=False, indent=4)
+
+    def add_entry(self, content):
+        entry = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "content": content
+        }
+        self.entries.append(entry)
+        self.save_entries()
+        print("✓ 일기가 성공적으로 저장되었습니다!")
+
+    def list_entries(self):
+        if not self.entries:
+            print("작성된 일기가 없습니다.")
+            return
+        print("\\n=== 일기 목록 ===")
+        for idx, entry in enumerate(self.entries, 1):
+            print(f"[{idx}] {entry['timestamp']}\\n{entry['content']}\\n{'-'*20}")
+
+def main():
+    diary = SimpleDiary()
+    while True:
+        print("\\n=== Simple Diary ===")
+        print("1. 새 일기 추가")
+        print("2. 일기 목록 보기")
+        print("3. 종료")
+        choice = input("선택하세요: ").strip()
+        
+        if choice == "1":
+            content = input("내용을 입력하세요: ").strip()
+            if content:
+                diary.add_entry(content)
+            else:
+                print("빈 내용은 저장할 수 없습니다.")
+        elif choice == "2":
+            diary.list_entries()
+        elif choice == "3":
+            print("다이어리를 종료합니다.")
+            break
+        else:
+            print("올바른 선택이 아닙니다.")
+
+if __name__ == "__main__":
+    main()
+`;
+        fs.writeFileSync(path.join(SIM_DIR, "review", "diary.py"), healedCode);
+        fs.writeFileSync(path.join(SIM_DIR, "review", "spec.md"), feedbackSpec);
+        if (fs.existsSync(path.join(SIM_DIR, "tasks", "spec.md"))) fs.unlinkSync(path.join(SIM_DIR, "tasks", "spec.md"));
+
+        addAuditLog(
+          "Executor",
+          "STATE_TRANSITION",
+          `Completed self-healing. Corrected diary.py to support interactive CLI menus. Moved back to review/.`,
+          "diary.py",
+          { from: "tasks", to: "review" }
+        );
+        activeSimState.thoughtChain.push("[Executor Agent] Completed modifications. Advanced to [review/] with healed deliverables.");
+        await delay(2000);
+      } else {
+        activeSimState.thoughtChain.push("[Critic Agent] <thought>Analyzing balance_query.py. The SQLite connector does not handle exception state if sqlite3 db gets locked. Also, the user requirement specifies 'reporting findings in standard markdown table layout', but balance_query.py simply prints a raw string! This violates the target spec constraint 100% completion rule.</thought>");
+        activeSimState.thoughtChain.push("[Critic Agent] CRITIC AUDIT FAILED! Missing markdown table reports and db lock safety. Marking FAIL and reverting state back to [tasks/].");
+        
+        // Inject adversarial feedback into tasks/spec.md and revert files
+        const feedbackSpec = refinedSpec + `\n\n## Adversarial Critic Feedback (FAIL - Rev 1)\n- **Reason**: Generated code prints raw terminal string instead of the requested 'standard markdown table layout'.\n- **Fix**: Code must format the output value inside a neat markdown table format:\n| Customer ID | Balance |\n|---|---|\n| usr-9901 | $X.XX |\nAnd implement SQLite connector exceptions safety.`;
+        
+        fs.writeFileSync(path.join(SIM_DIR, "tasks", "spec.md"), feedbackSpec);
+        
+        // Delete from review
+        if (fs.existsSync(reviewPath)) fs.unlinkSync(reviewPath);
+        if (fs.existsSync(path.join(SIM_DIR, "review", "spec.md"))) fs.unlinkSync(path.join(SIM_DIR, "review", "spec.md"));
+
+        activeSimState.iteration = 2;
+        activeSimState.metrics.planAdherence = 0.5;
+        activeSimState.metrics.argumentCorrectness = 0.6;
+        activeSimState.metrics.reasoningCoherence = 0.7;
+
+        addAuditLog(
+          "Critic",
+          "AUDIT_FAIL",
+          `Adversarial audit failed. Target file balance_query.py missed markdown table format requirements. Forcing Reversion.`,
+          "balance_query.py",
+          { from: "review", to: "tasks" },
+          "California AI Transparency Act Section 3 (System traceability & verification)"
+        );
+
+        await delay(2500);
+
+        // Re-trigger Executor with Self-Healing feedback
+        activeSimState.currentStep = "EXECUTOR_STAGE_HEALING";
+        activeSimState.activeAgent = "EXECUTOR";
+        activeSimState.thoughtChain.push("[Executor Agent] Received Critic feedback. Initiating self-healing protocol... Modifying balance_query.py to write markdown table reports...");
+        await delay(2500);
+
+        const healedCode = `import sqlite3
 import re
 
 def query_user_balance_markdown(user_id: str):
@@ -906,19 +1109,20 @@ def query_user_balance_markdown(user_id: str):
 if __name__ == "__main__":
     query_user_balance_markdown("usr-9901")
 `;
-      fs.writeFileSync(path.join(SIM_DIR, "review", "balance_query.py"), healedCode);
-      fs.writeFileSync(path.join(SIM_DIR, "review", "spec.md"), feedbackSpec);
-      if (fs.existsSync(path.join(SIM_DIR, "tasks", "spec.md"))) fs.unlinkSync(path.join(SIM_DIR, "tasks", "spec.md"));
+        fs.writeFileSync(path.join(SIM_DIR, "review", "balance_query.py"), healedCode);
+        fs.writeFileSync(path.join(SIM_DIR, "review", "spec.md"), feedbackSpec);
+        if (fs.existsSync(path.join(SIM_DIR, "tasks", "spec.md"))) fs.unlinkSync(path.join(SIM_DIR, "tasks", "spec.md"));
 
-      addAuditLog(
-        "Executor",
-        "STATE_TRANSITION",
-        `Completed self-healing. Corrected balance_query.py to generate Markdown tables. Moved back to review/.`,
-        "balance_query.py",
-        { from: "tasks", to: "review" }
-      );
-      activeSimState.thoughtChain.push("[Executor Agent] Completed modifications. Advanced to [review/] with healed deliverables.");
-      await delay(2000);
+        addAuditLog(
+          "Executor",
+          "STATE_TRANSITION",
+          `Completed self-healing. Corrected balance_query.py to generate Markdown tables. Moved back to review/.`,
+          "balance_query.py",
+          { from: "tasks", to: "review" }
+        );
+        activeSimState.thoughtChain.push("[Executor Agent] Completed modifications. Advanced to [review/] with healed deliverables.");
+        await delay(2000);
+      }
     }
 
     // FINAL CRITIC VERIFICATION

@@ -1,0 +1,1 @@
+You are the Output verifier against spec.md and registry rules.

@@ -539,13 +539,25 @@ async function handleRun(args: string[]) {
     }
 
     if (!specContent) {
-      specContent = `# Sprint Contract Spec
+      if (userReq.toLowerCase().includes("diary")) {
+        specContent = `# Sprint Contract: Simple Diary Application
+## 1. Goal
+Fulfill the requirement: Create a simple diary application that can store, list, and save diary entries.
+
+## 2. Rigorous Constraints
+- Must write output to a readable file like \`diary.json\` or \`diary.txt\`.
+- Each entry must be timestamped automatically.
+- Vague Section (TBD): The layout or UI might be decided randomly later.
+`;
+      } else {
+        specContent = `# Sprint Contract Spec
 ## 1. Goal
 Fulfill: ${userReq}
 ## 2. Rigorous Constraints
 - Must align with dynamic AGENTS.md rulesets.
 - TBD: Connection values or style configurations will be decided randomly on runtime.
 `;
+      }
     }
 
     fs.writeFileSync(specPath, specContent);
@@ -566,6 +578,7 @@ Fulfill: ${userReq}
     // Refine Specs
     specContent = specContent
       .replace("TBD: Connection values or style configurations will be decided randomly on runtime.", "")
+      .replace("TBD: The layout or UI might be decided randomly later.", "")
       .concat("\n## 3. Hardened Strict Specifications\n- Sandbox execution directories only.\n- Output reports must comply with standards defined in AGENTS.md.");
     fs.writeFileSync(specPath, specContent);
 
@@ -580,7 +593,12 @@ Fulfill: ${userReq}
     let targetContent = "";
 
     if (workflow === "PROJECT_CODING") {
-      targetFileName = "balance_query.py";
+      if (userReq.toLowerCase().includes("diary")) {
+        targetFileName = "diary.py";
+      } else {
+        targetFileName = "balance_query.py";
+      }
+
       if (ai) {
         let modelName = "gemini-3.5-flash";
         let executorInstruction = "You are the Micro Executor Agent.";
@@ -590,6 +608,21 @@ Fulfill: ${userReq}
           modelName = loadedConf.agents.executor.model || modelName;
           executorInstruction = loadedConf.agents.executor.systemInstruction || executorInstruction;
           executorTemp = loadedConf.agents.executor.temperature !== undefined ? loadedConf.agents.executor.temperature : executorTemp;
+        }
+
+        // Dynamically request best filename from Gemini
+        try {
+          const fnResponse = await ai.models.generateContent({
+            model: modelName,
+            contents: `Identify the single most appropriate filename for the python deliverable of this specification: \n${specContent}\nReturn ONLY the filename itself (e.g. 'diary.py' or 'balance_query.py'), with NO markdown, NO formatting, and NO extra words.`,
+            config: { temperature: 0.1 }
+          });
+          const parsedFn = fnResponse.text?.trim();
+          if (parsedFn && parsedFn.endsWith(".py") && !parsedFn.includes(" ") && parsedFn.length < 50) {
+            targetFileName = parsedFn;
+          }
+        } catch (err: any) {
+          console.warn("Failed to dynamically fetch filename from API, using default.", err.message);
         }
 
         console.log(`Querying Executor Agent (${modelName}) to write target python files...`);
@@ -608,7 +641,55 @@ Fulfill: ${userReq}
       }
 
       if (!targetContent) {
-        targetContent = `import sqlite3
+        if (targetFileName === "diary.py" || userReq.toLowerCase().includes("diary")) {
+          targetFileName = "diary.py";
+          targetContent = `import os
+import json
+from datetime import datetime
+
+class SimpleDiary:
+    def __init__(self, filename="diary.json"):
+        self.filename = filename
+        self.entries = []
+        self.load_entries()
+
+    def load_entries(self):
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, 'r', encoding='utf-8') as f:
+                    self.entries = json.load(f)
+            except Exception:
+                self.entries = []
+
+    def save_entries(self):
+        with open(self.filename, 'w', encoding='utf-8') as f:
+            json.dump(self.entries, f, ensure_ascii=False, indent=4)
+
+    def add_entry(self, content):
+        entry = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "content": content
+        }
+        self.entries.append(entry)
+        self.save_entries()
+        print("✓ 일기가 성공적으로 저장되었습니다!")
+
+    def list_entries(self):
+        if not self.entries:
+            print("작성된 일기가 없습니다.")
+            return
+        print("\\n=== 일기 목록 ===")
+        for idx, entry in enumerate(self.entries, 1):
+            print(f"[{idx}] {entry['timestamp']}\\n{entry['content']}\\n{'-'*20}")
+
+if __name__ == "__main__":
+    diary = SimpleDiary()
+    diary.add_entry("오늘 OpenCode Harness를 활용하여 일기장 애플리케이션을 구현했다. 정말 신기하고 재미있었다!")
+    diary.list_entries()
+`;
+        } else {
+          targetFileName = "balance_query.py";
+          targetContent = `import sqlite3
 # SQLite lookup engine
 def query_usr_balance():
     print("| Customer ID | Balance |")
@@ -618,6 +699,7 @@ def query_usr_balance():
 if __name__ == "__main__":
     query_usr_balance()
 `;
+        }
       }
     } else if (workflow === "MD_KNOWLEDGE") {
       targetFileName = "architecture.md";
