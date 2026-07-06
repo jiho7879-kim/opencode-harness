@@ -81,23 +81,46 @@ This file acts as the dynamic manual defining the operating boundaries, authorit
   const opencodeJsonPath = path.join(CWD, "opencode.json");
   if (!fs.existsSync(opencodeJsonPath)) {
     const defaultOpencode = {
+      $schema: "https://opencode.ai/config.json",
+      default_agent: "orchestrator",
+      instructions: ["AGENTS.md"],
+      skills: {
+        paths: [".opencode/skills"]
+      },
       workflowType: "PROJECT_CODING",
       ambiguityThreshold: 0.3,
       maxIterations: 3,
       jurySize: 3,
       strictMode: true,
-      agents: {
+      agent: {
+        orchestrator: {
+          description: "Sprint Contract Pipeline Orchestrator (로컬 primary agent)",
+          model: "opencode/big-pickle",
+          prompt: "{file:~/.config/opencode/agents/orchestrator.md}",
+          mode: "primary",
+          permission: {
+            task: {
+              "*": "deny",
+              "planner": "allow",
+              "executor": "allow",
+              "critic": "allow"
+            }
+          }
+        },
         planner: {
+          description: "Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md.",
           model: "gemini-3.5-flash",
           temperature: 0.2,
           systemInstruction: "You are the Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md."
         },
         executor: {
+          description: "Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/.",
           model: "gemini-3.5-flash",
           temperature: 0.5,
           systemInstruction: "You are the Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/."
         },
         critic: {
+          description: "Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL.",
           model: "gemini-3.5-flash",
           temperature: 0.1,
           systemInstruction: "You are the Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL."
@@ -166,6 +189,16 @@ function handleStatus() {
       loadedConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
       console.log(`  \x1b[32m[Config Loaded]\x1b[0m harness.config.json (fallback)`);
     } catch (_) {}
+  }
+
+  if (loadedConfig) {
+    if (loadedConfig.agent && !loadedConfig.agents) {
+      loadedConfig.agents = {
+        planner: loadedConfig.agent.planner,
+        executor: loadedConfig.agent.executor,
+        critic: loadedConfig.agent.critic
+      };
+    }
   }
 
   if (loadedConfig && loadedConfig.agents) {

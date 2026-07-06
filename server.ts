@@ -60,23 +60,46 @@ This file acts as the dynamic manual defining the operating boundaries, authorit
   const opencodeJsonPath = path.join(targetDir, "opencode.json");
   if (!fs.existsSync(opencodeJsonPath)) {
     const defaultOpencode = {
+      $schema: "https://opencode.ai/config.json",
+      default_agent: "orchestrator",
+      instructions: ["AGENTS.md"],
+      skills: {
+        paths: [".opencode/skills"]
+      },
       workflowType: "PROJECT_CODING",
       ambiguityThreshold: 0.3,
       maxIterations: 3,
       jurySize: 3,
       strictMode: true,
-      agents: {
+      agent: {
+        orchestrator: {
+          description: "Sprint Contract Pipeline Orchestrator (로컬 primary agent)",
+          model: "opencode/big-pickle",
+          prompt: "{file:~/.config/opencode/agents/orchestrator.md}",
+          mode: "primary",
+          permission: {
+            task: {
+              "*": "deny",
+              "planner": "allow",
+              "executor": "allow",
+              "critic": "allow"
+            }
+          }
+        },
         planner: {
+          description: "Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md.",
           model: "gemini-3.5-flash",
           temperature: 0.2,
           systemInstruction: "You are the Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md."
         },
         executor: {
+          description: "Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/.",
           model: "gemini-3.5-flash",
           temperature: 0.5,
           systemInstruction: "You are the Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/."
         },
         critic: {
+          description: "Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL.",
           model: "gemini-3.5-flash",
           temperature: 0.1,
           systemInstruction: "You are the Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL."
@@ -104,6 +127,36 @@ This file acts as the dynamic manual defining the operating boundaries, authorit
       )
     );
   }
+}
+
+// Help resolve and normalize either agents or agent object structure safely
+function loadAndNormalizeConfig(targetDir = SIM_DIR) {
+  const opencodePath = path.join(targetDir, "opencode.json");
+  const configPath = path.join(targetDir, "harness.config.json");
+  let loadedConfig: any = null;
+
+  if (fs.existsSync(opencodePath)) {
+    try {
+      loadedConfig = JSON.parse(fs.readFileSync(opencodePath, "utf-8"));
+    } catch (_) {}
+  } else if (fs.existsSync(configPath)) {
+    try {
+      loadedConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    } catch (_) {}
+  }
+
+  if (loadedConfig) {
+    // If config has 'agent' but not 'agents', normalize it
+    if (loadedConfig.agent && !loadedConfig.agents) {
+      loadedConfig.agents = {
+        planner: loadedConfig.agent.planner,
+        executor: loadedConfig.agent.executor,
+        critic: loadedConfig.agent.critic
+      };
+    }
+  }
+
+  return loadedConfig;
 }
 
 // Global in-memory state for the active simulation
@@ -215,18 +268,7 @@ app.get("/api/harness/status", (req, res) => {
   const reviewFiles = fs.readdirSync(path.join(SIM_DIR, "review")).filter((f) => f !== ".gitkeep");
   const doneFiles = fs.readdirSync(path.join(SIM_DIR, "done")).filter((f) => f !== ".gitkeep");
 
-  let loadedConfig = null;
-  const opencodePath = path.join(SIM_DIR, "opencode.json");
-  const configPath = path.join(SIM_DIR, "harness.config.json");
-  if (fs.existsSync(opencodePath)) {
-    try {
-      loadedConfig = JSON.parse(fs.readFileSync(opencodePath, "utf-8"));
-    } catch (_) {}
-  } else if (fs.existsSync(configPath)) {
-    try {
-      loadedConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    } catch (_) {}
-  }
+  const loadedConfig = loadAndNormalizeConfig();
 
   res.json({
     ...activeSimState,
@@ -261,14 +303,7 @@ app.post("/api/harness/workspace", (req, res) => {
     SIM_DIR = resolvedPath;
 
     // Load configurations from target if available
-    const opencodePath = path.join(SIM_DIR, "opencode.json");
-    const configPath = path.join(SIM_DIR, "harness.config.json");
-    let loadedConfig: any = {};
-    if (fs.existsSync(opencodePath)) {
-      try { loadedConfig = JSON.parse(fs.readFileSync(opencodePath, "utf-8")); } catch (_) {}
-    } else if (fs.existsSync(configPath)) {
-      try { loadedConfig = JSON.parse(fs.readFileSync(configPath, "utf-8")); } catch (_) {}
-    }
+    const loadedConfig = loadAndNormalizeConfig(SIM_DIR) || {};
 
     activeSimState.currentWorkflow = loadedConfig.workflowType || "PROJECT_CODING";
     activeSimState.ambiguityThreshold = loadedConfig.ambiguityThreshold || 0.3;
@@ -417,16 +452,11 @@ app.post("/api/harness/run", async (req, res) => {
         let plannerInstruction = "You are the Macro Planner Agent.";
         let plannerTemp = 0.2;
 
-        const opencodePath = path.join(SIM_DIR, "opencode.json");
-        if (fs.existsSync(opencodePath)) {
-          try {
-            const conf = JSON.parse(fs.readFileSync(opencodePath, "utf-8"));
-            if (conf.agents && conf.agents.planner) {
-              modelName = conf.agents.planner.model || modelName;
-              plannerInstruction = conf.agents.planner.systemInstruction || plannerInstruction;
-              plannerTemp = conf.agents.planner.temperature !== undefined ? conf.agents.planner.temperature : plannerTemp;
-            }
-          } catch (_) {}
+        const conf = loadAndNormalizeConfig();
+        if (conf && conf.agents && conf.agents.planner) {
+          modelName = conf.agents.planner.model || modelName;
+          plannerInstruction = conf.agents.planner.systemInstruction || plannerInstruction;
+          plannerTemp = conf.agents.planner.temperature !== undefined ? conf.agents.planner.temperature : plannerTemp;
         }
 
         const prompt = `${plannerInstruction}\n\nCreate a highly detailed, rigid specifications contract (spec.md) based on user's raw requirement: "${reqText}" for a ${workflow} task.
@@ -591,16 +621,11 @@ Create structured XML/Markdown presentation blueprint outlining slide layouts an
           let executorInstruction = "You are the Micro Executor Agent.";
           let executorTemp = 0.5;
 
-          const opencodePath = path.join(SIM_DIR, "opencode.json");
-          if (fs.existsSync(opencodePath)) {
-            try {
-              const conf = JSON.parse(fs.readFileSync(opencodePath, "utf-8"));
-              if (conf.agents && conf.agents.executor) {
-                modelName = conf.agents.executor.model || modelName;
-                executorInstruction = conf.agents.executor.systemInstruction || executorInstruction;
-                executorTemp = conf.agents.executor.temperature !== undefined ? conf.agents.executor.temperature : executorTemp;
-              }
-            } catch (_) {}
+          const conf = loadAndNormalizeConfig();
+          if (conf && conf.agents && conf.agents.executor) {
+            modelName = conf.agents.executor.model || modelName;
+            executorInstruction = conf.agents.executor.systemInstruction || executorInstruction;
+            executorTemp = conf.agents.executor.temperature !== undefined ? conf.agents.executor.temperature : executorTemp;
           }
 
           const executorPrompt = `${executorInstruction}\n\nWrite complete, functional python code based on this specification: \n${refinedSpec}\nYour output should contain ONLY the code blocks, fully comments, proper error handling and SQLite query for usr-9901. Do not use truncated code.`;
