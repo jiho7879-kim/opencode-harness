@@ -180,14 +180,30 @@ function loadAndNormalizeConfig(targetDir = SIM_DIR) {
   }
 
   if (loadedConfig) {
-    // If config has 'agent' but not 'agents', normalize it
-    if (loadedConfig.agent && !loadedConfig.agents) {
-      loadedConfig.agents = {
-        planner: loadedConfig.agent.planner,
-        executor: loadedConfig.agent.executor,
-        critic: loadedConfig.agent.critic
-      };
-    }
+    const rawAgents = loadedConfig.agent || loadedConfig.agents || {};
+    
+    // Support robust aliasing of subagents for our engine
+    const planner = rawAgents.planner || {};
+    const executor = rawAgents.executor || rawAgents.generator || {};
+    const critic = rawAgents.critic || rawAgents.reviewer || rawAgents.evaluator || {};
+    
+    loadedConfig.agents = {
+      planner: {
+        model: planner.model || "gemini-3.5-flash",
+        systemInstruction: planner.prompt || planner.systemInstruction || "You are the Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md.",
+        temperature: planner.temperature !== undefined ? planner.temperature : 0.2
+      },
+      executor: {
+        model: executor.model || "gemini-3.5-flash",
+        systemInstruction: executor.prompt || executor.systemInstruction || "You are the Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/.",
+        temperature: executor.temperature !== undefined ? executor.temperature : 0.5
+      },
+      critic: {
+        model: critic.model || "gemini-3.5-flash",
+        systemInstruction: critic.prompt || critic.systemInstruction || "You are the Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL.",
+        temperature: critic.temperature !== undefined ? critic.temperature : 0.1
+      }
+    };
   }
 
   return loadedConfig;
