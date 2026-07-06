@@ -60,6 +60,13 @@ export default function App() {
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"dashboard" | "cli" | "agents-md">("dashboard");
   const [agentsMdContent, setAgentsMdContent] = useState<string>("");
+  const [workspaceInput, setWorkspaceInput] = useState<string>("");
+
+  useEffect(() => {
+    if (simFolder && !workspaceInput) {
+      setWorkspaceInput(simFolder);
+    }
+  }, [simFolder]);
 
   // Poll status from express backend
   const fetchStatus = async () => {
@@ -81,12 +88,30 @@ export default function App() {
           logs: data.logs,
           thoughtChain: data.thoughtChain,
           activeAgent: data.activeAgent,
+          config: data.config,
         }));
         setSimFolder(data.projectDir);
         setApiEnabled(data.apiEnabled);
       }
     } catch (err) {
       console.error("Failed to fetch harness status:", err);
+    }
+  };
+
+  const handleWorkspaceChange = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!workspaceInput.trim()) return;
+    try {
+      const res = await fetch("/api/harness/workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspacePath: workspaceInput }),
+      });
+      if (res.ok) {
+        await fetchStatus();
+      }
+    } catch (err) {
+      console.error("Failed to switch workspace path:", err);
     }
   };
 
@@ -272,7 +297,23 @@ export default function App() {
             <span className={`w-2 h-2 rounded-full ${apiEnabled ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}`}></span>
             <span>{apiEnabled ? "Gemini Live API 활성" : "에뮬레이티드 오케스트레이터 가동 중"}</span>
           </div>
-          <span className="text-xs text-slate-400 font-mono hidden md:inline">CWD: simulated-project/</span>
+          
+          <form onSubmit={handleWorkspaceChange} className="hidden md:flex items-center space-x-2 bg-slate-50 border border-slate-200 px-3 py-1 rounded-lg">
+            <span className="text-[10px] text-slate-400 font-bold font-mono">Workspace:</span>
+            <input
+              type="text"
+              value={workspaceInput}
+              onChange={(e) => setWorkspaceInput(e.target.value)}
+              placeholder="프로젝트 폴더 경로"
+              className="text-xs bg-transparent border-none focus:outline-none w-48 font-mono text-slate-700"
+            />
+            <button
+              type="submit"
+              className="text-[10px] bg-slate-800 text-white font-bold px-2 py-0.5 rounded hover:bg-slate-700 transition-colors cursor-pointer"
+            >
+              적용
+            </button>
+          </form>
         </div>
       </header>
 
@@ -575,24 +616,44 @@ export default function App() {
                     <div className={`flex flex-col items-center p-3 rounded-xl border transition-all duration-300 w-[140px] bg-white shadow-sm ${
                       state.activeAgent === AgentRole.PLANNER ? "ring-2 ring-emerald-500 border-emerald-500 scale-105" : "border-slate-200"
                     }`}>
-                      <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-1">State Configurator</span>
+                      <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                        State Configurator
+                        {state.config?.agents?.planner && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" title="Custom configuration loaded" />}
+                      </span>
                       <div className="bg-emerald-100 text-emerald-800 p-2 rounded-lg mb-2">
                         <Sparkles className="w-5 h-5" />
                       </div>
                       <h4 className="text-xs font-bold text-slate-800">거시 설계자</h4>
-                      <span className="text-[9px] text-slate-500 font-mono mt-0.5">Gemini 3.5 Flash</span>
+                      <span className="text-[9px] text-slate-500 font-mono mt-0.5 text-center truncate w-full">
+                        {state.config?.agents?.planner?.model || "Gemini 3.5 Flash"}
+                      </span>
+                      {state.config?.agents?.planner && (
+                        <span className="text-[8px] bg-emerald-50 text-emerald-600 border border-emerald-100 px-1 py-0.5 rounded-sm mt-1 scale-90 font-sans">
+                          활성화됨 ✓
+                        </span>
+                      )}
                     </div>
 
                     {/* Node B: Executor */}
                     <div className={`flex flex-col items-center p-3 rounded-xl border transition-all duration-300 w-[140px] bg-white shadow-sm ${
                       state.activeAgent === AgentRole.EXECUTOR ? "ring-2 ring-blue-500 border-blue-500 scale-105" : "border-slate-200"
                     }`}>
-                      <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-1">Local Craftsman</span>
+                      <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                        Local Craftsman
+                        {state.config?.agents?.executor && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" title="Custom configuration loaded" />}
+                      </span>
                       <div className="bg-blue-100 text-blue-800 p-2 rounded-lg mb-2">
                         <Code className="w-5 h-5" />
                       </div>
                       <h4 className="text-xs font-bold text-slate-800">국소적 장인</h4>
-                      <span className="text-[9px] text-slate-500 font-mono mt-0.5">Qwen Coder 72B</span>
+                      <span className="text-[9px] text-slate-500 font-mono mt-0.5 text-center truncate w-full">
+                        {state.config?.agents?.executor?.model || "Qwen Coder 72B"}
+                      </span>
+                      {state.config?.agents?.executor && (
+                        <span className="text-[8px] bg-blue-50 text-blue-600 border border-blue-100 px-1 py-0.5 rounded-sm mt-1 scale-90 font-sans">
+                          활성화됨 ✓
+                        </span>
+                      )}
                     </div>
 
                   </div>
@@ -602,12 +663,22 @@ export default function App() {
                     <div className={`flex flex-col items-center p-3 rounded-xl border transition-all duration-300 w-[140px] bg-white shadow-sm ${
                       state.activeAgent === AgentRole.CRITIC ? "ring-2 ring-rose-500 border-rose-500 scale-105" : "border-slate-200"
                     }`}>
-                      <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-1">Strict Auditor</span>
+                      <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                        Strict Auditor
+                        {state.config?.agents?.critic && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" title="Custom configuration loaded" />}
+                      </span>
                       <div className="bg-rose-100 text-rose-800 p-2 rounded-lg mb-2">
                         <Shield className="w-5 h-5" />
                       </div>
                       <h4 className="text-xs font-bold text-slate-800">냉혹한 검열관</h4>
-                      <span className="text-[9px] text-slate-500 font-mono mt-0.5">DeepSeek-R1-70B</span>
+                      <span className="text-[9px] text-slate-500 font-mono mt-0.5 text-center truncate w-full">
+                        {state.config?.agents?.critic?.model || "DeepSeek-R1-70B"}
+                      </span>
+                      {state.config?.agents?.critic && (
+                        <span className="text-[8px] bg-rose-50 text-rose-600 border border-rose-100 px-1 py-0.5 rounded-sm mt-1 scale-90 font-sans">
+                          활성화됨 ✓
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
