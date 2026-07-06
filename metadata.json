@@ -1,0 +1,6 @@
+{
+  "name": "Opencode Agent Harness",
+  "description": "An engineering harness for single and multi-agent systems designed to suppress premature actions, iterate planning, control ambiguity, and ensure operating safety under professional metrics and regulatory requirements.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
