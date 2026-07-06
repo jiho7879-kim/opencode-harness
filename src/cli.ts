@@ -315,9 +315,134 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Command: chat (Interactive Chat Session)
+async function handleChat(args: string[]) {
+  const opencodeJsonPath = path.join(CWD, "opencode.json");
+  const configPath = path.join(CWD, "harness.config.json");
+  let config: any = {};
+  
+  if (fs.existsSync(opencodeJsonPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(opencodeJsonPath, "utf-8"));
+      console.log(`\x1b[32m✓ Loaded configuration from opencode.json\x1b[0m`);
+    } catch (err: any) {
+      console.warn(`\x1b[33mWarning: Failed to parse opencode.json (${err.message})\x1b[0m`);
+    }
+  } else if (fs.existsSync(configPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      console.log(`\x1b[32m✓ Loaded configuration from harness.config.json\x1b[0m`);
+    } catch (err: any) {
+      console.warn(`\x1b[33mWarning: Failed to parse harness.config.json (${err.message})\x1b[0m`);
+    }
+  }
+
+  console.log(`\n\x1b[1m\x1b[36mOpenCode AI Chat Assistant\x1b[0m - v1.0.0`);
+  console.log(`Active Workspace: \x1b[34m${CWD}\x1b[0m`);
+  console.log(`Type your requirement or chat with the assistant.
+- Type \x1b[32m'run'\x1b[0m to execute the multi-agent orchestration loop.
+- Type \x1b[33m'status'\x1b[0m to check folder compliance.
+- Type \x1b[31m'exit'\x1b[0m to quit.\n`);
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const chatHistory: any[] = [
+    {
+      role: "system",
+      content: `You are the OpenCode AI Assistant. You help the user build software, design multi-agent systems, and write code.
+Workspace path: ${CWD}
+Configured workflow: ${config.workflowType || "PROJECT_CODING"}
+Ambiguity threshold: ${config.ambiguityThreshold || 0.3}
+
+When the user asks you to build, run, or orchestrate something, guide them and offer to run the harness loop by typing 'run'. Keep replies professional, short, and in Korean.`
+    }
+  ];
+
+  function promptUser() {
+    rl.question("\x1b[1m\x1b[32mYou >\x1b[0m ", async (input) => {
+      const trimmed = input.trim();
+      if (trimmed.toLowerCase() === "exit" || trimmed.toLowerCase() === "quit") {
+        rl.close();
+        return;
+      }
+
+      if (trimmed.toLowerCase() === "run") {
+        console.log("\n\x1b[35m[Orchestration Stage initiated from Chat]\x1b[0m");
+        rl.close();
+        await handleRun([]);
+        return;
+      }
+
+      if (trimmed.toLowerCase() === "status") {
+        handleStatus();
+        promptUser();
+        return;
+      }
+
+      if (!trimmed) {
+        promptUser();
+        return;
+      }
+
+      if (apiKey) {
+        process.stdout.write("\x1b[1m\x1b[36mOpenCode >\x1b[0m Thinking...");
+        try {
+          const ai = new GoogleGenAI({
+            apiKey,
+            httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+          });
+
+          const contents = [
+            ...chatHistory.map(ch => ({
+              role: ch.role === "system" ? "user" : ch.role,
+              parts: [{ text: ch.content }]
+            })),
+            { role: "user", parts: [{ text: trimmed }] }
+          ];
+
+          readline.clearLine(process.stdout, 0);
+          readline.cursorTo(process.stdout, 0);
+          process.stdout.write("\x1b[1m\x1b[36mOpenCode >\x1b[0m ");
+
+          const response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: contents,
+          });
+
+          const reply = response.text || "";
+          console.log(reply);
+          
+          chatHistory.push({ role: "user", content: trimmed });
+          chatHistory.push({ role: "model", content: reply });
+
+        } catch (err: any) {
+          readline.clearLine(process.stdout, 0);
+          readline.cursorTo(process.stdout, 0);
+          console.log(`\x1b[31mError querying Gemini API: ${err.message}\x1b[0m`);
+        }
+      } else {
+        console.log(`\x1b[1m\x1b[36mOpenCode >\x1b[0m [Emulated Mode] Received: "${trimmed}". Please configure GEMINI_API_KEY environment variable to chat with real AI.`);
+      }
+
+      promptUser();
+    });
+  }
+
+  promptUser();
+}
+
 // CLI Route Dispatcher
 const args = process.argv.slice(2);
-const command = args[0] || "help";
+let command = args[0] || "";
+
+// Normalize path arguments to start the chat assistant in that folder
+if (!command || command === "." || command === "./" || fs.existsSync(path.resolve(CWD, command))) {
+  command = "chat";
+}
 
 switch (command) {
   case "init":
@@ -328,6 +453,9 @@ switch (command) {
     break;
   case "run":
     handleRun(args).catch(console.error);
+    break;
+  case "chat":
+    handleChat(args).catch(console.error);
     break;
   case "help":
   default:
