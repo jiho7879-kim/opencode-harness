@@ -12,23 +12,23 @@ const PORT = 3000;
 app.use(express.json());
 
 // Path to simulated project
-const SIM_DIR = path.join(process.cwd(), "simulated-project");
+let SIM_DIR = path.join(process.cwd(), "simulated-project");
 
 // Ensure simulation directories exist
-function initSimDirs() {
-  if (!fs.existsSync(SIM_DIR)) {
-    fs.mkdirSync(SIM_DIR, { recursive: true });
+function initSimDirs(targetDir = SIM_DIR) {
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
   }
   const subdirs = ["tasks", "review", "done"];
   subdirs.forEach((dir) => {
-    const fullPath = path.join(SIM_DIR, dir);
+    const fullPath = path.join(targetDir, dir);
     if (!fs.existsSync(fullPath)) {
       fs.mkdirSync(fullPath, { recursive: true });
     }
   });
 
   // Write default AGENTS.md
-  const agentsMdPath = path.join(SIM_DIR, "AGENTS.md");
+  const agentsMdPath = path.join(targetDir, "AGENTS.md");
   if (!fs.existsSync(agentsMdPath)) {
     fs.writeFileSync(
       agentsMdPath,
@@ -56,8 +56,38 @@ This file acts as the dynamic manual defining the operating boundaries, authorit
     );
   }
 
+  // Write default opencode.json with custom agents configuration template
+  const opencodeJsonPath = path.join(targetDir, "opencode.json");
+  if (!fs.existsSync(opencodeJsonPath)) {
+    const defaultOpencode = {
+      workflowType: "PROJECT_CODING",
+      ambiguityThreshold: 0.3,
+      maxIterations: 3,
+      jurySize: 3,
+      strictMode: true,
+      agents: {
+        planner: {
+          model: "gemini-3.5-flash",
+          temperature: 0.2,
+          systemInstruction: "You are the Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md."
+        },
+        executor: {
+          model: "gemini-3.5-flash",
+          temperature: 0.5,
+          systemInstruction: "You are the Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/."
+        },
+        critic: {
+          model: "gemini-3.5-flash",
+          temperature: 0.1,
+          systemInstruction: "You are the Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL."
+        }
+      }
+    };
+    fs.writeFileSync(opencodeJsonPath, JSON.stringify(defaultOpencode, null, 2));
+  }
+
   // Write default config
-  const configPath = path.join(SIM_DIR, "harness.config.json");
+  const configPath = path.join(targetDir, "harness.config.json");
   if (!fs.existsSync(configPath)) {
     fs.writeFileSync(
       configPath,
@@ -185,6 +215,19 @@ app.get("/api/harness/status", (req, res) => {
   const reviewFiles = fs.readdirSync(path.join(SIM_DIR, "review")).filter((f) => f !== ".gitkeep");
   const doneFiles = fs.readdirSync(path.join(SIM_DIR, "done")).filter((f) => f !== ".gitkeep");
 
+  let loadedConfig = null;
+  const opencodePath = path.join(SIM_DIR, "opencode.json");
+  const configPath = path.join(SIM_DIR, "harness.config.json");
+  if (fs.existsSync(opencodePath)) {
+    try {
+      loadedConfig = JSON.parse(fs.readFileSync(opencodePath, "utf-8"));
+    } catch (_) {}
+  } else if (fs.existsSync(configPath)) {
+    try {
+      loadedConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    } catch (_) {}
+  }
+
   res.json({
     ...activeSimState,
     files: {
@@ -194,7 +237,58 @@ app.get("/api/harness/status", (req, res) => {
     },
     projectDir: SIM_DIR,
     apiEnabled: !!aiClient,
+    config: loadedConfig,
   });
+});
+
+// Update active project workspace directory path dynamically
+app.post("/api/harness/workspace", (req, res) => {
+  const { workspacePath } = req.body;
+  if (!workspacePath) {
+    return res.status(400).json({ error: "Missing workspacePath" });
+  }
+
+  try {
+    let resolvedPath = workspacePath;
+    if (!path.isAbsolute(resolvedPath)) {
+      resolvedPath = path.resolve(process.cwd(), resolvedPath);
+    }
+
+    // Verify or initialize standard structures
+    initSimDirs(resolvedPath);
+
+    // Switch SIM_DIR
+    SIM_DIR = resolvedPath;
+
+    // Load configurations from target if available
+    const opencodePath = path.join(SIM_DIR, "opencode.json");
+    const configPath = path.join(SIM_DIR, "harness.config.json");
+    let loadedConfig: any = {};
+    if (fs.existsSync(opencodePath)) {
+      try { loadedConfig = JSON.parse(fs.readFileSync(opencodePath, "utf-8")); } catch (_) {}
+    } else if (fs.existsSync(configPath)) {
+      try { loadedConfig = JSON.parse(fs.readFileSync(configPath, "utf-8")); } catch (_) {}
+    }
+
+    activeSimState.currentWorkflow = loadedConfig.workflowType || "PROJECT_CODING";
+    activeSimState.ambiguityThreshold = loadedConfig.ambiguityThreshold || 0.3;
+    activeSimState.maxIterations = loadedConfig.maxIterations || 3;
+    activeSimState.currentStep = `Switched Workspace to ${SIM_DIR}`;
+    activeSimState.thoughtChain.push(`[Harness Workspace] Switched active project directory to: ${SIM_DIR}`);
+
+    addAuditLog(
+      "Harness",
+      "WORKSPACE_SWITCH",
+      `Switched active project workspace path to: ${SIM_DIR}`,
+      "opencode.json",
+      undefined,
+      "EU AI Act Art. 13 (Technical documentation and trace accuracy)"
+    );
+
+    res.json({ success: true, workspaceDir: SIM_DIR, config: loadedConfig });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Init simulation
@@ -319,7 +413,23 @@ app.post("/api/harness/run", async (req, res) => {
     if (aiClient) {
       // Real LLM Planning Call
       try {
-        const prompt = `You are the Macro Planner Agent. Create a highly detailed, rigid specifications contract (spec.md) based on user's raw requirement: "${reqText}" for a ${workflow} task.
+        let modelName = "gemini-3.5-flash";
+        let plannerInstruction = "You are the Macro Planner Agent.";
+        let plannerTemp = 0.2;
+
+        const opencodePath = path.join(SIM_DIR, "opencode.json");
+        if (fs.existsSync(opencodePath)) {
+          try {
+            const conf = JSON.parse(fs.readFileSync(opencodePath, "utf-8"));
+            if (conf.agents && conf.agents.planner) {
+              modelName = conf.agents.planner.model || modelName;
+              plannerInstruction = conf.agents.planner.systemInstruction || plannerInstruction;
+              plannerTemp = conf.agents.planner.temperature !== undefined ? conf.agents.planner.temperature : plannerTemp;
+            }
+          } catch (_) {}
+        }
+
+        const prompt = `${plannerInstruction}\n\nCreate a highly detailed, rigid specifications contract (spec.md) based on user's raw requirement: "${reqText}" for a ${workflow} task.
 Include:
 1. Target Objective
 2. Rigorous Constraint Checklist (e.g. SQLite usr_id, exact color themes #003366, layouts, BBox coordinates)
@@ -329,8 +439,11 @@ Include:
 Do not write code, write markdown specification only. Be extremely verbose to reduce ambiguity. Include some potential TBDs or vague sections intentionally for the first round, as the harness will detect it and force refinement.`;
 
         const response = await aiClient.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: modelName,
           contents: prompt,
+          config: {
+            temperature: plannerTemp,
+          }
         });
         specContent = response.text || "";
       } catch (err) {
@@ -474,10 +587,29 @@ Create structured XML/Markdown presentation blueprint outlining slide layouts an
       targetFileName = "balance_query.py";
       if (aiClient) {
         try {
-          const executorPrompt = `You are the Micro Executor Agent. Write complete, functional python code based on this specification: \n${refinedSpec}\nYour output should contain ONLY the code blocks, fully comments, proper error handling and SQLite query for usr-9901. Do not use truncated code.`;
+          let modelName = "gemini-3.5-flash";
+          let executorInstruction = "You are the Micro Executor Agent.";
+          let executorTemp = 0.5;
+
+          const opencodePath = path.join(SIM_DIR, "opencode.json");
+          if (fs.existsSync(opencodePath)) {
+            try {
+              const conf = JSON.parse(fs.readFileSync(opencodePath, "utf-8"));
+              if (conf.agents && conf.agents.executor) {
+                modelName = conf.agents.executor.model || modelName;
+                executorInstruction = conf.agents.executor.systemInstruction || executorInstruction;
+                executorTemp = conf.agents.executor.temperature !== undefined ? conf.agents.executor.temperature : executorTemp;
+              }
+            } catch (_) {}
+          }
+
+          const executorPrompt = `${executorInstruction}\n\nWrite complete, functional python code based on this specification: \n${refinedSpec}\nYour output should contain ONLY the code blocks, fully comments, proper error handling and SQLite query for usr-9901. Do not use truncated code.`;
           const execRes = await aiClient.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: modelName,
             contents: executorPrompt,
+            config: {
+              temperature: executorTemp,
+            }
           });
           targetFileContent = execRes.text || "";
         } catch (err) {

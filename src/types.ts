@@ -40,6 +40,25 @@ export interface AuditLogEntry {
   hash: string; // For integrity
 }
 
+export interface AgentConfig {
+  model: string;
+  temperature?: number;
+  systemInstruction?: string;
+}
+
+export interface HarnessConfig {
+  workflowType: WorkflowType;
+  ambiguityThreshold: number;
+  maxIterations: number;
+  jurySize: number;
+  strictMode: boolean;
+  agents?: {
+    planner?: AgentConfig;
+    executor?: AgentConfig;
+    critic?: AgentConfig;
+  };
+}
+
 export interface HarnessState {
   currentWorkflow: WorkflowType;
   rawRequirement: string;
@@ -61,12 +80,5 @@ export interface HarnessState {
     path: string;
     content: string;
   } | null;
-}
-
-export interface HarnessConfig {
-  workflowType: WorkflowType;
-  ambiguityThreshold: number;
-  maxIterations: number;
-  jurySize: number;
-  strictMode: boolean;
+  config?: HarnessConfig;
 }

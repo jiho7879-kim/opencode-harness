@@ -77,6 +77,37 @@ This file acts as the dynamic manual defining the operating boundaries, authorit
     console.log("  \x1b[34m[Created]\x1b[0m AGENTS.md (Dynamic manual and rules of engagement)");
   }
 
+  // Create default opencode.json with custom agents configuration template
+  const opencodeJsonPath = path.join(CWD, "opencode.json");
+  if (!fs.existsSync(opencodeJsonPath)) {
+    const defaultOpencode = {
+      workflowType: "PROJECT_CODING",
+      ambiguityThreshold: 0.3,
+      maxIterations: 3,
+      jurySize: 3,
+      strictMode: true,
+      agents: {
+        planner: {
+          model: "gemini-3.5-flash",
+          temperature: 0.2,
+          systemInstruction: "You are the Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md."
+        },
+        executor: {
+          model: "gemini-3.5-flash",
+          temperature: 0.5,
+          systemInstruction: "You are the Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/."
+        },
+        critic: {
+          model: "gemini-3.5-flash",
+          temperature: 0.1,
+          systemInstruction: "You are the Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL."
+        }
+      }
+    };
+    fs.writeFileSync(opencodeJsonPath, JSON.stringify(defaultOpencode, null, 2));
+    console.log("  \x1b[34m[Created]\x1b[0m opencode.json (Configuration & Custom Agent settings)");
+  }
+
   // Create default harness.config.json
   const configPath = path.join(CWD, "harness.config.json");
   if (!fs.existsSync(configPath)) {
@@ -119,6 +150,39 @@ function handleStatus() {
   const agentsMdExists = fs.existsSync(path.join(CWD, "AGENTS.md"));
   console.log(`  ${agentsMdExists ? "\x1b[32m[Manual Found]" : "\x1b[31m[Missing Manual]"} AGENTS.md\x1b[0m`);
 
+  // Parse config/opencode.json and display custom agents configuration
+  const opencodePath = path.join(CWD, "opencode.json");
+  const configPath = path.join(CWD, "harness.config.json");
+  let loadedConfig: any = null;
+  if (fs.existsSync(opencodePath)) {
+    try {
+      loadedConfig = JSON.parse(fs.readFileSync(opencodePath, "utf-8"));
+      console.log(`  \x1b[32m[Config Loaded]\x1b[0m opencode.json`);
+    } catch (_) {
+      console.log(`  \x1b[31m[Invalid Config]\x1b[0m opencode.json could not be parsed`);
+    }
+  } else if (fs.existsSync(configPath)) {
+    try {
+      loadedConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      console.log(`  \x1b[32m[Config Loaded]\x1b[0m harness.config.json (fallback)`);
+    } catch (_) {}
+  }
+
+  if (loadedConfig && loadedConfig.agents) {
+    console.log(`  \x1b[34m[Agents Configuration]\x1b[0m`);
+    if (loadedConfig.agents.planner) {
+      console.log(`    ├── Planner Agent  : \x1b[36m${loadedConfig.agents.planner.model}\x1b[0m (Temp: ${loadedConfig.agents.planner.temperature ?? 0.2})`);
+    }
+    if (loadedConfig.agents.executor) {
+      console.log(`    ├── Executor Agent : \x1b[36m${loadedConfig.agents.executor.model}\x1b[0m (Temp: ${loadedConfig.agents.executor.temperature ?? 0.5})`);
+    }
+    if (loadedConfig.agents.critic) {
+      console.log(`    ├── Critic Agent   : \x1b[36m${loadedConfig.agents.critic.model}\x1b[0m (Temp: ${loadedConfig.agents.critic.temperature ?? 0.1})`);
+    }
+  } else {
+    console.log(`  \x1b[33m[Agents Configuration]\x1b[0m Default model setup active (gemini-3.5-flash)`);
+  }
+
   if (!foldersOk || !agentsMdExists) {
     console.log("\n\x1b[33mWarning: Workspace is incomplete. Run 'opencode-harness init' to bootstrap correctly.\x1b[0m");
   } else {
@@ -144,13 +208,21 @@ async function handleRun(args: string[]) {
   }
 
   // Load config if exists
+  const opencodePath = path.join(CWD, "opencode.json");
   const configPath = path.join(CWD, "harness.config.json");
   let threshold = 0.3;
-  if (fs.existsSync(configPath)) {
+  let loadedConf: any = {};
+  if (fs.existsSync(opencodePath)) {
     try {
-      const conf = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      threshold = conf.ambiguityThreshold || 0.3;
-      workflow = conf.workflowType || workflow;
+      loadedConf = JSON.parse(fs.readFileSync(opencodePath, "utf-8"));
+      threshold = loadedConf.ambiguityThreshold || 0.3;
+      workflow = loadedConf.workflowType || workflow;
+    } catch (_) {}
+  } else if (fs.existsSync(configPath)) {
+    try {
+      loadedConf = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      threshold = loadedConf.ambiguityThreshold || 0.3;
+      workflow = loadedConf.workflowType || workflow;
     } catch (_) {}
   }
 
@@ -208,11 +280,24 @@ async function handleRun(args: string[]) {
     let specContent = "";
 
     if (ai) {
-      console.log("Querying Gemini-3.5-Flash to formulate initial sprint specifications...");
+      let modelName = "gemini-3.5-flash";
+      let plannerInstruction = "You are the Macro Planner Agent.";
+      let plannerTemp = 0.2;
+
+      if (loadedConf && loadedConf.agents && loadedConf.agents.planner) {
+        modelName = loadedConf.agents.planner.model || modelName;
+        plannerInstruction = loadedConf.agents.planner.systemInstruction || plannerInstruction;
+        plannerTemp = loadedConf.agents.planner.temperature !== undefined ? loadedConf.agents.planner.temperature : plannerTemp;
+      }
+
+      console.log(`Querying ${modelName} to formulate initial sprint specifications...`);
       try {
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: `Create detailed spec.md specifications for requirement "${userReq}" targeting a ${workflow} workflow. Outline rigid objectives, functional rules, and constraint checklist. Add some potential vague TBDs for ambiguity testing.`,
+          model: modelName,
+          contents: `${plannerInstruction}\n\nCreate detailed spec.md specifications for requirement "${userReq}" targeting a ${workflow} workflow. Outline rigid objectives, functional rules, and constraint checklist. Add some potential vague TBDs for ambiguity testing.`,
+          config: {
+            temperature: plannerTemp,
+          }
         });
         specContent = response.text || "";
       } catch (err: any) {
@@ -263,7 +348,34 @@ Fulfill: ${userReq}
 
     if (workflow === "PROJECT_CODING") {
       targetFileName = "balance_query.py";
-      targetContent = `import sqlite3
+      if (ai) {
+        let modelName = "gemini-3.5-flash";
+        let executorInstruction = "You are the Micro Executor Agent.";
+        let executorTemp = 0.5;
+
+        if (loadedConf && loadedConf.agents && loadedConf.agents.executor) {
+          modelName = loadedConf.agents.executor.model || modelName;
+          executorInstruction = loadedConf.agents.executor.systemInstruction || executorInstruction;
+          executorTemp = loadedConf.agents.executor.temperature !== undefined ? loadedConf.agents.executor.temperature : executorTemp;
+        }
+
+        console.log(`Querying Executor Agent (${modelName}) to write target python files...`);
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: `${executorInstruction}\n\nWrite complete, functional python code based on this specification: \n${specContent}\nYour output should contain ONLY python code, fully commented. Do not use truncated code.`,
+            config: {
+              temperature: executorTemp,
+            }
+          });
+          targetContent = response.text || "";
+        } catch (err: any) {
+          console.warn("API Executor call failed, falling back to static template.", err.message);
+        }
+      }
+
+      if (!targetContent) {
+        targetContent = `import sqlite3
 # SQLite lookup engine
 def query_usr_balance():
     print("| Customer ID | Balance |")
@@ -273,6 +385,7 @@ def query_usr_balance():
 if __name__ == "__main__":
     query_usr_balance()
 `;
+      }
     } else if (workflow === "MD_KNOWLEDGE") {
       targetFileName = "architecture.md";
       targetContent = `# Workspace Topology\nValidated minimalist files-as-state design model.`;

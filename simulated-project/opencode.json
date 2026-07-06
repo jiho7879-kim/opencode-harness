@@ -1,0 +1,24 @@
+{
+  "workflowType": "PROJECT_CODING",
+  "ambiguityThreshold": 0.3,
+  "maxIterations": 3,
+  "jurySize": 3,
+  "strictMode": true,
+  "agents": {
+    "planner": {
+      "model": "gemini-3.5-flash",
+      "temperature": 0.2,
+      "systemInstruction": "You are the Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md."
+    },
+    "executor": {
+      "model": "gemini-3.5-flash",
+      "temperature": 0.5,
+      "systemInstruction": "You are the Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/."
+    },
+    "critic": {
+      "model": "gemini-3.5-flash",
+      "temperature": 0.1,
+      "systemInstruction": "You are the Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL."
+    }
+  }
+}
