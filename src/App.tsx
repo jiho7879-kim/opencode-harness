@@ -53,6 +53,9 @@ export default function App() {
     thoughtChain: ["시스템이 준비되었습니다. 템플릿을 선택하고 오케스트레이션 루프를 시작해 보세요."],
     activeAgent: null,
     selectedFileContent: null,
+    requiresClarification: false,
+    clarificationQuestion: "",
+    clarificationResponse: "",
   });
 
   const [simFolder, setSimFolder] = useState<string>("");
@@ -61,6 +64,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"dashboard" | "cli" | "agents-md">("dashboard");
   const [agentsMdContent, setAgentsMdContent] = useState<string>("");
   const [workspaceInput, setWorkspaceInput] = useState<string>("");
+  const [clarificationInput, setClarificationInput] = useState<string>("");
 
   useEffect(() => {
     if (simFolder && !workspaceInput) {
@@ -89,6 +93,9 @@ export default function App() {
           thoughtChain: data.thoughtChain,
           activeAgent: data.activeAgent,
           config: data.config,
+          requiresClarification: data.requiresClarification,
+          clarificationQuestion: data.clarificationQuestion,
+          clarificationResponse: data.clarificationResponse,
         }));
         setSimFolder(data.projectDir);
         setApiEnabled(data.apiEnabled);
@@ -205,6 +212,24 @@ export default function App() {
       }
     } catch (err) {
       console.error("Error resetting simulation:", err);
+    }
+  };
+
+  // Submit clarification feedback
+  const handleClarificationSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    try {
+      const res = await fetch("/api/harness/clarify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ response: clarificationInput }),
+      });
+      if (res.ok) {
+        setClarificationInput("");
+        await fetchStatus();
+      }
+    } catch (err) {
+      console.error("Failed to submit clarification:", err);
     }
   };
 
@@ -441,6 +466,45 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {/* Interactive Clarification Panel */}
+                <AnimatePresence>
+                  {state.requiresClarification && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -15 }}
+                      className="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-200 shadow-sm"
+                    >
+                      <div className="flex items-start gap-2.5 mb-3">
+                        <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="text-xs font-bold text-amber-800">Harness Gate: 요구사항 세부 협상 단계</h4>
+                          <p className="text-[10.5px] text-amber-700/90 mt-1 leading-relaxed">
+                            {state.clarificationQuestion || "TBD 사양이 검출되어 잠금이 설정되었습니다. 세부 지침을 보강해 주세요."}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <form onSubmit={handleClarificationSubmit} className="space-y-2">
+                        <textarea
+                          rows={2}
+                          value={clarificationInput}
+                          onChange={(e) => setClarificationInput(e.target.value)}
+                          placeholder="예: 일기장 목록 출력 시 눈에 띄는 구분선과 날짜 형식을 'YYYY-MM-DD'로 깔끔하게 처리해줘."
+                          className="w-full text-xs p-2.5 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-800 placeholder-slate-400"
+                        />
+                        <button
+                          type="submit"
+                          className="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 px-3 rounded-lg font-bold text-[11px] transition-colors flex items-center justify-center gap-1 shadow-sm"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          피드백 제출 및 오케스트레이션 잠금 해제
+                        </button>
+                      </form>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Control Buttons */}
                 <div className="mt-6 space-y-2 pt-4 border-t border-slate-100">

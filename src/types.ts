@@ -81,4 +81,7 @@ export interface HarnessState {
     content: string;
   } | null;
   config?: HarnessConfig;
+  requiresClarification?: boolean;
+  clarificationQuestion?: string;
+  clarificationResponse?: string;
 }

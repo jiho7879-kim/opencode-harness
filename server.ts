@@ -271,6 +271,9 @@ interface SimState {
     regulationChecked: string;
     hash: string;
   }>;
+  requiresClarification?: boolean;
+  clarificationQuestion?: string;
+  clarificationResponse?: string;
 }
 
 let activeSimState: SimState = {
@@ -291,6 +294,9 @@ let activeSimState: SimState = {
     ambiguityScore: 1.0,
   },
   logs: [],
+  requiresClarification: false,
+  clarificationQuestion: "",
+  clarificationResponse: "",
 };
 
 // Log helper
@@ -441,6 +447,9 @@ app.post("/api/harness/init", (req, res) => {
         ambiguityScore: 1.0,
       },
       logs: [],
+      requiresClarification: false,
+      clarificationQuestion: "",
+      clarificationResponse: "",
     };
 
     addAuditLog(
@@ -498,6 +507,18 @@ app.post("/api/harness/reset", (req, res) => {
     ambiguityScore: 1.0,
   };
   activeSimState.logs = [];
+  activeSimState.requiresClarification = false;
+  activeSimState.clarificationQuestion = "";
+  activeSimState.clarificationResponse = "";
+  res.json({ success: true });
+});
+
+// Clarify input response endpoint
+app.post("/api/harness/clarify", (req, res) => {
+  const { response } = req.body;
+  activeSimState.clarificationResponse = response || "";
+  activeSimState.requiresClarification = false;
+  activeSimState.thoughtChain.push(`[Harness Control Gate] Received user feedback: "${response || "Skipped (Auto-refinement)"}"`);
   res.json({ success: true });
 });
 
@@ -640,7 +661,7 @@ Create structured XML/Markdown presentation blueprint outlining slide layouts an
     // Initial evaluation
     let ambiguityScore = 0.8; // Initially high due to TBD sections
     activeSimState.metrics.ambiguityScore = ambiguityScore;
-    activeSimState.thoughtChain.push(`[Harness Control Gate] Constraint audit failed. Ambiguity Score: ${ambiguityScore} > Threshold (0.3). Vague sections detected ("TBD", "later", "on the fly"). REJECTING physical write. Triggering Iterative Refinement Loop.`);
+    activeSimState.thoughtChain.push(`[Harness Control Gate] Constraint audit failed. Ambiguity Score: ${ambiguityScore} > Threshold (0.3). Vague sections detected ("TBD", "later", "on the fly"). REJECTING physical write. Triggering Interactive Clarification...`);
     addAuditLog(
       "Harness Gate",
       "AUDIT_REJECT",
@@ -648,12 +669,26 @@ Create structured XML/Markdown presentation blueprint outlining slide layouts an
       "tasks/spec.md"
     );
 
+    // Interactive Clarification waiting stage
+    activeSimState.requiresClarification = true;
+    let clarQuestion = "질문: 다이어리나 데이터의 구체적인 저장 방식, 또는 UI 출력 시 강조하고 싶은 요구사항이 있으신가요?";
+    if (!reqText.toLowerCase().includes("diary")) {
+      clarQuestion = "질문: 어플리케이션 구현 시 데이터베이스 연결이나 화면 출력과 관련하여 추가하고 싶은 세부 사양이 있으신가요?";
+    }
+    activeSimState.clarificationQuestion = clarQuestion;
+    activeSimState.thoughtChain.push(`[Harness Control Gate] 모호성 해소를 위한 협상(Interactive Clarification) 단계에 진입했습니다. 사용자 피드백을 기다리는 중입니다...`);
+
+    // Poll until requiresClarification becomes false (resolved by /api/harness/clarify)
+    while (activeSimState.requiresClarification) {
+      await delay(500);
+    }
+
     activeSimState.iteration = 1;
     await delay(1500);
 
     // Iteration 1 Refinement
     activeSimState.activeAgent = "PLANNER";
-    activeSimState.thoughtChain.push("[Planner Agent] Parsing audit feedback. Removing TBD sections and hardening specifications...");
+    activeSimState.thoughtChain.push("[Planner Agent] Parsing audit feedback. Removing TBD sections and hardening specifications based on user input...");
     await delay(2000);
 
     // Update spec with refined content
@@ -676,6 +711,11 @@ Create structured XML/Markdown presentation blueprint outlining slide layouts an
       refinedSpec = refinedSpec
         .replace("TBD: We can add some beautiful custom canvas graphics or charts later, or maybe some cute cartoons if they look great.", "")
         .concat(`\n## 4. Visual Components Specification\n- No custom graphic widgets allowed. Only standard slide grids.\n- Strict 4:3 display ratio.`);
+    }
+
+    // Append clarification feedback if provided
+    if (activeSimState.clarificationResponse) {
+      refinedSpec = refinedSpec.concat(`\n\n## 5. User Clarified Directives\n- **User Response**: ${activeSimState.clarificationResponse}\n- Ensure all deliverables adhere tightly to this user-supplied mandate.`);
     }
 
     fs.writeFileSync(specPath, refinedSpec);
