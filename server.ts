@@ -14,11 +14,44 @@ app.use(express.json());
 // Path to simulated project
 let SIM_DIR = path.join(process.cwd(), "simulated-project");
 
+// Helper to write default agent prompts into a target directory
+function writeDefaultAgentPrompts(targetAgentsDir: string) {
+  try {
+    if (!fs.existsSync(targetAgentsDir)) {
+      fs.mkdirSync(targetAgentsDir, { recursive: true });
+    }
+    
+    const prompts: Record<string, string> = {
+      "orchestrator.md": "You are the primary Orchestrator Agent. Coordinate subagents and verify task progress.",
+      "planner.md": "You are the Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md.",
+      "reviewer.md": "You are the Plan Reviewer. Validates + issues Compliance Certificate.",
+      "generator.md": "You are the Certificate-gated code/deliverable generator.",
+      "evaluator.md": "You are the Output verifier against spec.md and registry rules.",
+      "executor.md": "You are the Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/.",
+      "critic.md": "You are the Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL."
+    };
+
+    for (const [filename, content] of Object.entries(prompts)) {
+      const filePath = path.join(targetAgentsDir, filename);
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, content, "utf-8");
+      }
+    }
+  } catch (err: any) {
+    console.error(`Failed to write default agent prompts in ${targetAgentsDir}:`, err.message);
+  }
+}
+
 // Ensure simulation directories exist
 function initSimDirs(targetDir = SIM_DIR) {
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
   }
+
+  // Ensure simulation agents prompts directory and files exist
+  const simAgentsDir = path.join(targetDir, "agents");
+  writeDefaultAgentPrompts(simAgentsDir);
+
   const subdirs = ["tasks", "review", "done"];
   subdirs.forEach((dir) => {
     const fullPath = path.join(targetDir, dir);

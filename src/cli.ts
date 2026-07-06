@@ -14,12 +14,52 @@ const CWD = process.cwd();
 const GLOBAL_DIR = path.join(os.homedir(), ".config", "opencode");
 const GLOBAL_CONFIG_PATH = path.join(GLOBAL_DIR, "opencode.json");
 
+// Helper to write default agent prompts into a target directory
+function writeDefaultAgentPrompts(targetAgentsDir: string) {
+  try {
+    if (!fs.existsSync(targetAgentsDir)) {
+      fs.mkdirSync(targetAgentsDir, { recursive: true });
+    }
+    
+    const prompts: Record<string, string> = {
+      "orchestrator.md": "You are the primary Orchestrator Agent. Coordinate subagents and verify task progress.",
+      "planner.md": "You are the Macro Planner Agent. Analyze requirements, break down tasks, and write clean, rigid specifications contract in tasks/spec.md.",
+      "reviewer.md": "You are the Plan Reviewer. Validates + issues Compliance Certificate.",
+      "generator.md": "You are the Certificate-gated code/deliverable generator.",
+      "evaluator.md": "You are the Output verifier against spec.md and registry rules.",
+      "executor.md": "You are the Micro Executor Agent. Read specifications from tasks/spec.md, write complete functional implementations, and move tasks to review/.",
+      "critic.md": "You are the Rigid Critic Agent. Review review/ deliverables, run dry-runs and regulatory verification checks, and stamp PASS or FAIL."
+    };
+
+    for (const [filename, content] of Object.entries(prompts)) {
+      const filePath = path.join(targetAgentsDir, filename);
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, content, "utf-8");
+      }
+    }
+  } catch (err: any) {
+    console.error(`Failed to write default agent prompts in ${targetAgentsDir}:`, err.message);
+  }
+}
+
 // Dynamic helper to ensure global opencode.json configuration exists
 function ensureGlobalConfig() {
   try {
     if (!fs.existsSync(GLOBAL_DIR)) {
       fs.mkdirSync(GLOBAL_DIR, { recursive: true });
     }
+    
+    // Create global agents directory and files
+    const globalAgentsDir = path.join(GLOBAL_DIR, "agents");
+    writeDefaultAgentPrompts(globalAgentsDir);
+
+    // Proactive self-healing check: If there's an opencode.json locally, ensure local agents exist too
+    const localOpencodePath = path.join(CWD, "opencode.json");
+    if (fs.existsSync(localOpencodePath)) {
+      const localAgentsDir = path.join(CWD, "agents");
+      writeDefaultAgentPrompts(localAgentsDir);
+    }
+
     if (!fs.existsSync(GLOBAL_CONFIG_PATH)) {
       const globalDefaultConfig = {
         $schema: "https://opencode.ai/config.json",
@@ -171,6 +211,10 @@ function handleInit() {
   console.log("\x1b[36mInitializing Opencode Agent Harness in current directory...\x1b[0m");
 
   ensureGlobalConfig();
+
+  // Create local agents directory and files
+  const localAgentsDir = path.join(CWD, "agents");
+  writeDefaultAgentPrompts(localAgentsDir);
 
   const subdirs = ["tasks", "review", "done"];
   subdirs.forEach((dir) => {
